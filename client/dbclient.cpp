@@ -442,8 +442,10 @@ namespace mongo {
         size_t idx = serverAddress.find( ":" );
         if ( idx != string::npos ) {
             port = strtol( serverAddress.substr( idx + 1 ).c_str(), 0, 10 );
-            ip = serverAddress.substr( 0 , idx );
-            ip = hostbyname(ip.c_str());
+			ip = serverAddress.substr( 0 , idx );
+			if (port!=0) {
+				ip = hostbyname(ip.c_str());
+			}
         } else {
             port = CmdLine::DefaultDBPort;
             ip = hostbyname( serverAddress.c_str() );

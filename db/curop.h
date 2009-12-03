@@ -9,7 +9,7 @@
 namespace mongo { 
 
     struct CurOp {
-        void reset(time_t now, const sockaddr_in &_client) { 
+        void reset(time_t now, const SockAddr &_client) { 
             active = true;
             opNum++;
             startTime = now;
@@ -26,7 +26,7 @@ namespace mongo {
         char ns[Namespace::MaxNsLen+2];
         char query[128];
         char zero;
-        struct sockaddr_in client;
+        SockAddr client;
 
         CurOp() { 
             active = false;
@@ -70,7 +70,7 @@ namespace mongo {
             b.append("query", query);
             b.append("inLock",  dbMutexInfo.isLocked());
             stringstream clientStr;
-            clientStr << inet_ntoa( client.sin_addr ) << ":" << ntohs( client.sin_port );
+            clientStr << client.toString();
             b.append("client", clientStr.str());
             return b.obj();
         }

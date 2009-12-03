@@ -124,7 +124,7 @@ namespace mongo {
     }
     
     // Returns false when request includes 'end'
-    bool assembleResponse( Message &m, DbResponse &dbresponse, const sockaddr_in &client ) {
+    bool assembleResponse( Message &m, DbResponse &dbresponse, const SockAddr &client ) {
         bool writeLock = true;
 
         // before we lock...
@@ -537,21 +537,21 @@ namespace mongo {
         }
         Message & container;
     };
-    
+
     /* a call from jscript to the database locally.
 
          m - inbound message
          out - outbound message, if there is any, will be set here.
                if there is one, out.data will be non-null on return.
-    		   The out.data buffer will automatically clean up when out
-    		   goes out of scope (out.freeIt==true)
+                  The out.data buffer will automatically clean up when out
+                  goes out of scope (out.freeIt==true)
 
        note we should already be in the mutex lock from connThread() at this point.
     */
     /*
     void jniCallbackDeprecated(Message& m, Message& out)
     {
-		//
+                //
         AuthenticationInfo *ai = currentClient.get()->ai;
         
         Database *clientOld = cc().database();
@@ -647,7 +647,7 @@ namespace mongo {
         }
     }
     */
-
+    
     void getDatabaseNames( vector< string > &names ) {
         boost::filesystem::path path( dbpath );
         for ( boost::filesystem::directory_iterator i( path );

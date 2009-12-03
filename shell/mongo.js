@@ -65,20 +65,20 @@ connect = function( url , user , pass ){
     if ( user && ! pass )
         throw "you specified a user and not a password.  either you need a password, or you're using the old connect api";
 
-    var idx = url.indexOf( "/" );
+    var idx = url.lastIndexOf( "/" );
     
     var db;
     
     if ( idx < 0 )
         db = new Mongo().getDB( url );
-    else 
+	else 
         db = new Mongo( url.substring( 0 , idx ) ).getDB( url.substring( idx + 1 ) );
-    
+	
     if ( user && pass ){
         if ( ! db.auth( user , pass ) ){
             throw "couldn't login";
         }
     }
-    
+	
     return db;
 }

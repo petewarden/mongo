@@ -47,13 +47,13 @@ namespace mongo {
             me = SockAddr( port );
         else
             me = SockAddr( ip.c_str(), port );
-        sock = ::socket(AF_INET, SOCK_STREAM, 0);
+        sock = ::socket(me.family, SOCK_STREAM, 0);
         if ( sock == INVALID_SOCKET ) {
             log() << "ERROR: listen(): invalid socket? " << errno << endl;
             return false;
         }
         prebindOptions( sock );
-        if ( ::bind(sock, (sockaddr *) &me.sa, me.addressSize) != 0 ) {
+        if ( ::bind(sock, me.getSockAddr(), me.addressSize) != 0 ) {
             log() << "listen(): bind() failed errno:" << errno << endl;
             if ( errno == 98 )
                 log() << "98 == addr already in use" << endl;
@@ -74,7 +74,7 @@ namespace mongo {
         static long connNumber = 0;
         SockAddr from;
         while ( 1 ) {
-            int s = accept(sock, (sockaddr *) &from.sa, &from.addressSize);
+            int s = accept(sock, from.getSockAddr(), &from.addressSize);
             if ( s < 0 ) {
                 if ( errno == ECONNABORTED || errno == EBADF ) {
                     log() << "Listener on port " << port << " aborted" << endl;
@@ -194,7 +194,7 @@ namespace mongo {
         int res;
         SockAddr farEnd;
         void run() {
-            res = ::connect(sock, (sockaddr *) &farEnd.sa, farEnd.addressSize);
+            res = ::connect(sock, farEnd.getSockAddr(), farEnd.addressSize);
         }
     };
 
@@ -202,7 +202,7 @@ namespace mongo {
     {
         farEnd = _far;
 
-        sock = socket(AF_INET, SOCK_STREAM, 0);
+        sock = socket(farEnd.family, SOCK_STREAM, 0);
         if ( sock == INVALID_SOCKET ) {
             log() << "ERROR: connect(): invalid socket? " << errno << endl;
             return false;

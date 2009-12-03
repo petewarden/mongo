@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <sstream>
 #include "goodies.h"
+#include <sys/un.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -107,27 +108,39 @@ namespace mongo {
 
     struct SockAddr {
         SockAddr() {
-            addressSize = sizeof(sockaddr_in);
-            memset(&sa, 0, sizeof(sa));
+			family = AF_INET;
+            addressSize = sizeof(si);
+            memset(&si, 0, sizeof(si));
         }
         SockAddr(int sourcePort); /* listener side */
         SockAddr(const char *ip, int port); /* EndPoint (remote) side, or if you want to specify which interface locally */
 
-        struct sockaddr_in sa;
+		int family;
+        struct sockaddr_in si;
+		struct sockaddr_un su;
         socklen_t addressSize;
 
         bool isLocalHost() const {
+		
+			if (family==AF_UNIX) {
+				return true;
+			} else {
 #if defined(_WIN32)
-            return sa.sin_addr.S_un.S_addr == 0x100007f;
+				return si.sin_addr.S_un.S_addr == 0x100007f;
 #else
-            return sa.sin_addr.s_addr == 0x100007f;
+				return si.sin_addr.s_addr == 0x100007f;
 #endif
+			}
         }
 
         string toString() const{
             stringstream out;
-            out << inet_ntoa(sa.sin_addr) << ':'
-                << ntohs(sa.sin_port);
+			if (family==AF_UNIX) {
+				out << su.sun_path << " (unix domain socket)";
+			} else {
+				out << inet_ntoa(si.sin_addr) << ':'
+					<< ntohs(si.sin_port);
+			}
             return out.str();
         }
 
@@ -136,22 +149,56 @@ namespace mongo {
         }
 
         unsigned getPort() {
-            return sa.sin_port;
+			if (family==AF_UNIX) {
+				return 0;
+			} else {
+				return si.sin_port;
+			}
         }
-
-        bool localhost() const { return inet_addr( "127.0.0.1" ) == sa.sin_addr.s_addr; }
+		
+		sockaddr* getSockAddr() {
+			if (family==AF_UNIX) {
+				return (sockaddr*)(&su);
+			} else {
+				return (sockaddr*)(&si);
+			}
+		}
+		
+        bool localhost() const { 
+			if (family==AF_UNIX) {
+				return true;
+			} else {
+				return inet_addr( "127.0.0.1" ) == si.sin_addr.s_addr; 
+			}
+		}
         
         bool operator==(const SockAddr& r) const {
-            return sa.sin_addr.s_addr == r.sa.sin_addr.s_addr &&
-                   sa.sin_port == r.sa.sin_port;
+			if (family!=r.family) {
+				return false;
+			}
+			
+			if (family==AF_UNIX) {
+				return (strcmp(su.sun_path, r.su.sun_path)==0);
+			} else {
+				return si.sin_addr.s_addr == r.si.sin_addr.s_addr &&
+					si.sin_port == r.si.sin_port;
+			}
         }
         bool operator!=(const SockAddr& r) const {
             return !(*this == r);
         }
         bool operator<(const SockAddr& r) const {
-            if ( sa.sin_port >= r.sa.sin_port )
-                return false;
-            return sa.sin_addr.s_addr < r.sa.sin_addr.s_addr;
+			if (family<r.family) {
+				return true;
+			} else if (family>r.family) {
+				return false;
+			} else if (family==AF_UNIX) {
+				return (strcmp(su.sun_path, r.su.sun_path)<0);
+			} else {
+				if ( si.sin_port >= r.si.sin_port )
+					return false;
+				return si.sin_addr.s_addr < r.si.sin_addr.s_addr;
+			}
         }
     };
 
@@ -168,9 +215,9 @@ namespace mongo {
                 sock = 0;
             }
         }
-        bool init(const SockAddr& myAddr);
+        bool init(SockAddr& myAddr);
         int recvfrom(char *buf, int len, SockAddr& sender);
-        int sendto(char *buf, int len, const SockAddr& EndPoint);
+        int sendto(char *buf, int len, SockAddr& EndPoint);
         int mtu(const SockAddr& sa) {
             return sa.isLocalHost() ? 16384 : 1480;
         }
@@ -179,26 +226,26 @@ namespace mongo {
     };
 
     inline int UDPConnection::recvfrom(char *buf, int len, SockAddr& sender) {
-        return ::recvfrom(sock, buf, len, 0, (sockaddr *) &sender.sa, &sender.addressSize);
+        return ::recvfrom(sock, buf, len, 0, sender.getSockAddr(), &sender.addressSize);
     }
 
-    inline int UDPConnection::sendto(char *buf, int len, const SockAddr& EndPoint) {
+    inline int UDPConnection::sendto(char *buf, int len, SockAddr& EndPoint) {
         if ( 0 && rand() < (RAND_MAX>>4) ) {
             out() << " NOTSENT ";
             //		out() << curTimeMillis() << " .TEST: NOT SENDING PACKET" << endl;
             return 0;
         }
-        return ::sendto(sock, buf, len, 0, (sockaddr *) &EndPoint.sa, EndPoint.addressSize);
+        return ::sendto(sock, buf, len, 0, EndPoint.getSockAddr(), EndPoint.addressSize);
     }
 
-    inline bool UDPConnection::init(const SockAddr& myAddr) {
-        sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    inline bool UDPConnection::init(SockAddr& myAddr) {
+        sock = socket(myAddr.family, SOCK_DGRAM, IPPROTO_UDP);
         if ( sock == INVALID_SOCKET ) {
             out() << "invalid socket? " << errno << endl;
             return false;
         }
         //out() << sizeof(sockaddr_in) << ' ' << myAddr.addressSize << endl;
-        if ( ::bind(sock, (sockaddr *) &myAddr.sa, myAddr.addressSize) != 0 ) {
+        if ( ::bind(sock, myAddr.getSockAddr(), myAddr.addressSize) != 0 ) {
             out() << "udp init failed" << endl;
             closesocket(sock);
             sock = 0;
@@ -216,20 +263,29 @@ namespace mongo {
     }
 
     inline SockAddr::SockAddr(int sourcePort) {
-        memset(sa.sin_zero, 0, sizeof(sa.sin_zero));
-        sa.sin_family = AF_INET;
-        sa.sin_port = htons(sourcePort);
-        sa.sin_addr.s_addr = htonl(INADDR_ANY);
-        addressSize = sizeof(sa);
+		family = AF_INET;
+        memset(si.sin_zero, 0, sizeof(si.sin_zero));
+        si.sin_family = AF_INET;
+        si.sin_port = htons(sourcePort);
+        si.sin_addr.s_addr = htonl(INADDR_ANY);
+        addressSize = sizeof(si);
     }
 
     inline SockAddr::SockAddr(const char * iporhost , int port) {
-        string ip = hostbyname( iporhost );
-        memset(sa.sin_zero, 0, sizeof(sa.sin_zero));
-        sa.sin_family = AF_INET;
-        sa.sin_port = htons(port);
-        sa.sin_addr.s_addr = inet_addr(ip.c_str());
-        addressSize = sizeof(sa);
+		if (port==0) {
+			family = AF_UNIX;
+			su.sun_family = AF_UNIX;
+			strncpy(su.sun_path, iporhost, sizeof(su.sun_path));
+			addressSize = sizeof(su);
+		} else {
+			family = AF_INET;
+			string ip = hostbyname( iporhost );
+			memset(si.sin_zero, 0, sizeof(si.sin_zero));
+			si.sin_family = AF_INET;
+			si.sin_port = htons(port);
+			si.sin_addr.s_addr = inet_addr(ip.c_str());
+			addressSize = sizeof(si);
+		}
     }
 
     inline string getHostName() {
